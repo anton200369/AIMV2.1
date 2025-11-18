@@ -111,6 +111,39 @@ def draw_rois(image, rois_dict, color=(0, 255, 0)):
     return vis
 
 
+def enhance_edges(image):
+    """Return a robust edge map for quadrilateral detection.
+
+    The pipeline normalizes contrast (CLAHE), denoises with bilateral
+    filtering, applies adaptive thresholding to cope with uneven lighting,
+    and then derives Canny edges with automatic thresholds. A final
+    dilation/closing step strengthens weak edges so a document held by
+    hand still forms a continuous contour.
+    """
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    denoised = cv2.bilateralFilter(gray, 7, 50, 50)
+
+    adaptive = cv2.adaptiveThreshold(
+        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 7
+    )
+
+    v = np.median(adaptive)
+    lower = int(max(0, 0.66 * v))
+    upper = int(min(255, 1.33 * v))
+    edges = cv2.Canny(adaptive, lower, upper)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+    edges = cv2.dilate(edges, kernel, iterations=1)
+
+    return edges
+
+
 # --- 4. MAIN LOOP ---
 collected_results = {}
 
@@ -133,14 +166,12 @@ try:
         frame = imutils.resize(frame, height=600)
         orig = frame.copy()
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edged = cv2.Canny(blurred, 50, 200)
+        edged = enhance_edges(frame)
 
-        contours = cv2.findContours(edged.copy(), cv2.RETR_LIST,
+        contours = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL,
                                     cv2.CHAIN_APPROX_SIMPLE)
         contours = imutils.grab_contours(contours)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:3]
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
 
         screenCnt = None
         for c in contours:
